@@ -1,0 +1,2 @@
+# effectiveruby_rinko
+mmjのスタッフによるEffectiveRubyの輪講のまとめです
