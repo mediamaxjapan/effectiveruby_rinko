@@ -1,2 +1,7 @@
 # effectiveruby_rinko
-mmjのスタッフによるEffectiveRubyの輪講のまとめです
+mmjのスタッフによるEffective Rubyの輪講のまとめです
+
+* 2/10 1～? 永名
+* 
+
+
