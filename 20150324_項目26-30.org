@@ -1,0 +1,43 @@
+* 第4章つづき
+前回の内容でsrc_ruby{rescue}節で個別の例外だけを処理することの重要さを説明した。
+エラーの解決方法について詳しく見ていく。
+** 項目26 src_ruby{retry} では回数の上限を設け、頻度を変化させ、オーディットトレイルを残そう
+*** 理由
+  - 無条件で実行するsrc_ruby{retry}は無限ループを書くようなものだ。
+*** 解決方法
+  #+BEGIN_SRC ruby
+  retries = 0
+  begin
+    service.update(record)
+  rescue VendorDeadlockError
+    raise if retries >= ３
+    retries += 1
+    sleep(15)
+    retry
+  end
+  #+END_SRC
+  - src_ruby{retries}はbeginの外に書かないとsrc_ruby{retry}時にリセットされるので注意
+*** さらに改善
+  - src_ruby{retry}が発生したことを残したい
+    - debugのため
+  - src_ruby{retry}の頻度
+    - ネットワーク接続のエラーなどは少し時間をおいて試すとうまくいくことがある。
+    - さらに問題を悪化させるだけの場合もある
+    - 最初は短いスパンで、回数ごとに指数関数的に待機時間を伸ばすのが一般的
+  #+BEGIN_SRC ruby
+  retries = 0
+  begin
+    service.update(record)
+  rescue VendorDeadlockError => e
+    raise if retries >= 3
+    retries += 1
+    logger.warn("API failure: #{e}, retrying…")
+    sleep(5 ** retries)
+    retry
+  end
+  #+END_SRC
+*** 覚えておくべき事項
+  - *無条件のsrc_ruby{retry}を使ってはならない。retryはコード内の暗黙のループとして扱うようにしよう。src_ruby{begin}ブロックの外側のスコープに境界変数を作り、上限に達するまで例外を生成するのである。*
+  - *src_ruby{retry}を使うときには、オーディットトレイルを作ろう。問題のあるコードを再試行して  もうまくいかないときには、最終的なエラーまでのイベントの連鎖を知りたいと思うはずだ*
+  - *再試行の前にディレイを入れるときには、問題を悪化させないようにsrc_ruby{rescue}節のなかで値を増やしていくことを検討しよう。*
+
