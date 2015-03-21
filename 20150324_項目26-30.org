@@ -1,9 +1,9 @@
 * 第4章つづき
-前回の内容で=rescue=節で個別の例外だけを処理することの重要さを説明した。
+前回の内容で =rescue= 節で個別の例外だけを処理することの重要さを説明した。
 エラーの解決方法について詳しく見ていく。
 ** 項目26 =retry= では回数の上限を設け、頻度を変化させ、オーディットトレイルを残そう
 *** 理由
-  - 無条件で実行する=retry=は無限ループを書くようなものだ。
+  - 無条件で実行する =retry= は無限ループを書くようなものだ。
 *** 解決方法
   #+BEGIN_SRC ruby
   retries = 0
@@ -16,11 +16,11 @@
     retry
   end
   #+END_SRC
-  - =retries=はbeginの外に書かないと=retry=時にリセットされるので注意
+  - =retries= はbeginの外に書かないと =retry= 時にリセットされるので注意
 *** さらに改善
-  - =retry=が発生したことを残したい
+  -  =retry= が発生したことを残したい
     - debugのため
-  - =retry=の頻度
+  -  =retry= の頻度
     - ネットワーク接続のエラーなどは少し時間をおいて試すとうまくいくことがある。
     - さらに問題を悪化させるだけの場合もある
     - 最初は短いスパンで、回数ごとに指数関数的に待機時間を伸ばすのが一般的
@@ -37,7 +37,153 @@
   end
   #+END_SRC
 *** 覚えておくべき事項
-  - *無条件の=retry=を使ってはならない。retryはコード内の暗黙のループとして扱うようにしよう。=begin=ブロックの外側のスコープに境界変数を作り、上限に達するまで例外を生成するのである。*
-  - *=retry=を使うときには、オーディットトレイルを作ろう。問題のあるコードを再試行して  もうまくいかないときには、最終的なエラーまでのイベントの連鎖を知りたいと思うはずだ*
-  - *再試行の前にディレイを入れるときには、問題を悪化させないように=rescue=節のなかで値を増やしていくことを検討しよう。*
-
+  - *無条件の =retry= を使ってはならない。* retryはコード内の暗黙のループとして扱うようにしよう。=begin=ブロックの外側のスコープに境界変数を作り、上限に達するまで例外を生成するのである。
+  - * =retry= を使うときには、オーディットトレイルを作ろう。* 問題のあるコードを再試行して  もうまくいかないときには、最終的なエラーまでのイベントの連鎖を知りたいと思うはずだ
+  - *再試行の前にディレイを入れるときには、問題を悪化させないように =rescue= 節のなかで値を増やしていくことを検討しよう。*
+** 項目27 スコープから飛び出したいときには =raise= ではなく =throw= を使おう
+例外を純粋に制御フローとして使うことは、Rubyでは珍しくなく、状況によっては奨励されている
+#+BEGIN_SRC ruby
+  begin
+  @characters.each do |character|
+    @colors.each do |color|
+      if player.valid?(character, color)
+        raise(Stoplteration)
+      end
+    end
+  end
+  rescue Stoplteration
+    # ...
+  end
+#+END_SRC
+ループを一気に抜けたいときにはこのように書きたくなる。
+*** 問題点
+  - 純粋な制御構造なのか、例外なのかの区別がつきにくい
+*** 解決策
+  - Rubyには =throw= , =catch= という制御構造がある。
+    - Javaでは例外に使うので紛らわしい
+  - =goto= に似ている
+  #+BEGIN_SRC ruby
+  match = catch(:jump) do
+    @characters.each do |character|
+    @colors.each do |color|
+      if player.valid?(character, color)
+        throw(:jump, [character, color])
+      end
+    end
+  #+END_SRC
+  - =throw= は渡されたシンボルとマッチする =catch= が見つかるまでスタックをたどっていき、見つからなければ =NameError= を起こす。
+*** 覚えておくべき事項
+  - *複雑な制御フローが必要なときには =raise= ではなく =throw= を使うようにしよう。 =throw= を使うとボーナスとしてスタックの上位にオブジェクトを送ることができる。 =catch= の戻り値はそのオブジェクトだ。
+  - *出来る限り単純な制御構造を使おう。* =catch= と =throw= の組み合わせは単純に =return= でスコープから抜け出すメソッドとそれに対するオブジェクトで置き換えられることが多い。
+* 第5章 メタプログラミング
+メタプログラミングは非常に強力な機能であるとともに、危険なものとなりうる
+すべてのRubyプログラマはメタプログラミングのどの部分が安全でどの部分が問題をはらんでいるかの知識を蓄えなければならない。
+** 項目28 モジュール、クラスフックを使いこなそう
+*** =extended= , =inherited= , =prepended= フック
+  - 項目21の例を =extend= を使って再実装する
+  #+BEGIN_SRC ruby
+  require 'forwardable'
+  
+  class RaisingHash
+    extend Forwardable
+    include Enumerable
+    def_delegators(:@hash, :[], :[]=, :delete, :each, :keys, :values, :length, :empty?, :has_key?)
+  
+    def initialize
+      @hash = Hash.new do |hash, key|
+        raise(KeyError, "invalid key '#{key}'!")
+      end
+    end
+  
+    def invert
+      other = self.class.new
+      other.replace!(@hash.invert)
+      other
+    end
+  
+    def initialize_copy(other)
+      @hash = @hash.dup
+    end
+  
+    def freeze
+      @hash.freeze
+      super
+    end
+  
+    protected
+    def replace!(hash)
+      hash.default_proc = @hash.default_proc
+      @hash = hash
+    end
+  end
+  #+END_SRC
+  - =freeze= , =taint= など =RaisingHash= が =Hash= と同様に動くようにするためだけのものは同じことの繰り返しになる。
+    - これらを以上ヘルパーメソッドを作ることで簡単に書けるようにする
+  #+BEGIN_SRC ruby
+  module SuperForwardable
+    #モジュールフック
+    def self.extended (klass)
+      require('forwardable')
+      klass.extend(Forwardable)
+    end
+    # superを呼び出す委譲ターゲットを作成
+    def def_delegators_with_super (target, *methods)
+      methods.each do |method|
+        target_method = "#{method}_without_super".to_sym
+        def_delegator(target, method, target_method)
+        define_method(method) do |*args, &block|
+          send(target_method, *args, &block)
+          super(*args, &block)
+        end
+      end
+    end
+  end
+  #+END_SRC
+  - 上記の =SuperForwardable= を使えば =RiasingHash= は以下のように書ける
+  #+BEGIN_SRC ruby
+  class RaisingHash
+    extend(SuperForwardable)
+    def_delegators(:@hash, :[], :[]=) #下記以外のメソッド
+    def_delegators_with_super(:@hash, :freeze, :taint, :untaint)
+    def initialize
+      # @hashを作る
+    end
+  end  
+  #+END_SRC
+  - =extend= は与えられたすべてのモジュールに対して、そのモジュールで定義されているすべてのメソッドと定数をレシーバに追加する。
+    - 上記の場合では =SuperForwardable= モジュール内のメソッドを =RaisingHash= のクラスメソッドとして追加している。
+  - =include= と =included= メソッドでも同様のことができる
+    - =include= メソッドはモジュールのメソッドと定数をレシーバのインスタンスに追加する。
+  - =prepend= , =prepended= というフックもRuby2.0から追加された
+    - こちらについては項目35でとりあげる
+  - =extended= , =included= , =prepended= フックはモジュールにのみ存在する。
+  - その他のフックはほぼすべてクラスとモジュール両方に存在する。
+    - 例外が =inherited= フックだ。
+*** =inherited= フック
+  - クラスが定義されるたびにこのフックで親クラスに新しいサブクラスのことを通知する
+  - "項目21: コレクションクラスからの継承よりも移譲を使うようにしよう"、を強制できるようにする
+  #+BEGIN_SRC ruby
+  module PreventInheritance
+    class InheritanceError < StandardError; end
+    def inherited (child)
+      raise(InheritanceError,
+            "#{child} cannot inherit from #{self}")
+    end
+  end  
+  # Array.extend(PreventInheritance)
+  # class BetterArray < Array; end 
+  # => InheritanceError
+  #+END_SRC
+  - =inherited= フックが呼び出されたときにはまだ子クラスは完全には定義されていない
+*** その他のフック
+  - =method_added=, =method_removed=, =method_undefined= : インスタンスメソッド用フック
+  - =singleton_method_added=, =singleton_method_removed=, =sigleton_method_undefined= : クラス／モジュールメソッド用フック
+  - 他のフックと同様、クラスメソッド、モジュールメソッドとして定義する必要がある。
+  - 引数はメソッド名のシンボル
+  - クラス／モジュールメソッド用の =singleton_method**= は定義時に自分自身を呼び出すので注意
+  - フックメソッドはすべてprivate
+*** 覚えておくべき事項
+  - *すべてのフックメソッドは、特異メソッドとして定義しなければならない。*
+  - *メソッドが追加、削除、定義解除されるときに呼び出されるフックは、メソッド名しか受け取らず､変更が行われるクラスは与えられない。* クラス名が知りたい場合には、=self= の値を使う。
+  - *singleton-method-addedを定義すると、自分自身の呼び出しが発生する。*
+  - *extend-object、append_features、prepend_featuresメソッドをオーバーライドしてはならない。* 代わりに、extended、included、prependedフックを使おう。
